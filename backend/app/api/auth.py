@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import logging
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password, create_access_token
@@ -24,6 +26,8 @@ from app.schemas.user import UserCreate, UserOut, Token
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
 @router.post("/register", response_model=UserOut)
@@ -62,4 +66,31 @@ def login(user_in: UserCreate, db: Session = Depends(get_db)):
     token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
 
     logger.info("User logged in successfully: %s", user.email)
-    return Token(access_token=token, token_type="bearer") 
+    return Token(access_token=token, token_type="bearer")
+
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(
+            token, 
+            settings.JWT_SECRET, 
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        raise credentials_exception
+    return user 

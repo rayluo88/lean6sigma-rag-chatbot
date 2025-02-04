@@ -14,6 +14,7 @@ handling user authentication, chat interactions, and RAG-based responses.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from .api import chat  # Import chat endpoints
 
 app = FastAPI(
     title="Lean Six Sigma RAG Chatbot API",
@@ -29,6 +30,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include chat router
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 
 @app.get("/")
 async def root():
