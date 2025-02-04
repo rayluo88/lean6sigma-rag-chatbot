@@ -46,7 +46,7 @@ def test_register_and_login():
         "password": "testpassword",
         "full_name": "Test User"
     }
-    response = client.post("/register", json=register_payload)
+    response = client.post("/api/v1/auth/register", json=register_payload)
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["email"] == "testuser@example.com"
@@ -55,9 +55,9 @@ def test_register_and_login():
     login_payload = {
         "email": "testuser@example.com",
         "password": "testpassword",
-        "full_name": "Test User"  # full_name is not strictly necessary in login but matching schema
+        "full_name": "Test User"
     }
-    response = client.post("/login", json=login_payload)
+    response = client.post("/api/v1/auth/login", json=login_payload)
     assert response.status_code == 200, response.text
     data = response.json()
     assert "access_token" in data 

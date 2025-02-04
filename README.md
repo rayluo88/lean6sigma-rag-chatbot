@@ -172,7 +172,8 @@ VITE_API_URL=http://localhost:8000
 
 - **Database Setup:**
   - PostgreSQL is configured and running using Docker Compose.
-  - Initial database migrations have been successfully created and applied using Alembic. The tables `users`, `chat_history`, and `alembic_version` are set up.
+  - Initial database migrations have been successfully created and applied using Alembic.
+  - Tables `users`, `chat_history`, and `alembic_version` are set up.
 
 - **Authentication System:**
   - Implemented user registration and login endpoints.
@@ -180,7 +181,24 @@ VITE_API_URL=http://localhost:8000
   - Login endpoint (`/login`) verifies user credentials and returns a JWT access token.
   - Comprehensive logging has been added to both endpoints for improved traceability.
 
-- **Pydantic Schemas:**
-  - Schemas for user creation (`UserCreate`), output (`UserOut`), and token management (`Token` and `TokenData`) have been defined.
+- **Chat System:**
+  - Basic RAG-based chatbot implementation with simulated responses.
+  - Chat endpoint (`/api/v1/chat/chat`) processes user queries and returns responses.
+  - Chat history is stored in the database for future reference.
+
+- **Free Tier Implementation:**
+  - Added query limiting functionality (10 queries per day for free tier).
+  - Query count tracking and automatic daily reset.
+  - Endpoint to check remaining queries (`/api/v1/chat/remaining`).
+  - Rate limiting with appropriate error messages.
+
+- **LSS Documentation System:**
+  - Established structured knowledge base organization.
+  - Created comprehensive documentation templates and guidelines.
+  - Implemented initial DMAIC methodology documentation.
+  - Added documentation API endpoints:
+    - List available documents (`/api/v1/docs/list`)
+    - Retrieve document content (`/api/v1/docs/content/{path}`)
+    - Support for both markdown and HTML rendered content.
 
 <!-- Current Progress Update End --> 
