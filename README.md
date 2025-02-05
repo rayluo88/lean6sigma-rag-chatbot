@@ -120,7 +120,7 @@ npm run dev
 ```
 
 The application will be available at:
-- Frontend: http://localhost:5173
+- Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
 
@@ -166,8 +166,6 @@ VITE_API_URL=http://localhost:8000
 
 [License Type] - see LICENSE file for details
 
-<!-- Current Progress Update Start -->
-
 ## Current Progress
 
 - **Database Setup:**
@@ -181,18 +179,23 @@ VITE_API_URL=http://localhost:8000
   - Login endpoint (`/login`) verifies user credentials and returns a JWT access token.
   - Comprehensive logging has been added to both endpoints for improved traceability.
 
+- **Frontend Development:**
+  - Implemented core layout with responsive design and navigation.
+  - Created authentication pages (Login/Register) with form validation.
+  - Added protected route handling and authentication state management.
+  - Implemented Documentation page with markdown rendering and search.
+  - Created Chat interface with real-time messaging and query limits.
+  - Added Profile page with user settings and password management.
+  - Integrated Material-UI components for consistent design.
+  - Implemented React Query for efficient data fetching and caching.
+
 - **Chat System:**
   - Basic RAG-based chatbot implementation with simulated responses.
   - Chat endpoint (`/api/v1/chat/chat`) processes user queries and returns responses.
   - Chat history is stored in the database for future reference.
+  - Real-time query limit tracking and display.
 
-- **Free Tier Implementation:**
-  - Added query limiting functionality (10 queries per day for free tier).
-  - Query count tracking and automatic daily reset.
-  - Endpoint to check remaining queries (`/api/v1/chat/remaining`).
-  - Rate limiting with appropriate error messages.
-
-- **LSS Documentation System:**
+- **Documentation System:**
   - Established structured knowledge base organization.
   - Created comprehensive documentation templates and guidelines.
   - Implemented initial DMAIC methodology documentation.
@@ -201,4 +204,8 @@ VITE_API_URL=http://localhost:8000
     - Retrieve document content (`/api/v1/docs/content/{path}`)
     - Support for both markdown and HTML rendered content.
 
-<!-- Current Progress Update End --> 
+- **Free Tier Implementation:**
+  - Added query limiting functionality (10 queries per day for free tier).
+  - Query count tracking and automatic daily reset.
+  - Endpoint to check remaining queries (`/api/v1/chat/remaining`).
+  - Rate limiting with appropriate error messages. 
