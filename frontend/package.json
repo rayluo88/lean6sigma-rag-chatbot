@@ -25,6 +25,7 @@
     "eslint": "^8.54.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.4",
+    "jsdom": "^24.0.0",
     "typescript": "^5.3.2",
     "vite": "^5.0.2",
     "vitest": "^0.34.6"
@@ -34,6 +35,8 @@
     "build": "tsc && vite build",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:integration": "vitest --config vitest.config.ts src/services/__tests__/*.test.ts",
+    "test:watch": "vitest --watch"
   }
 } 
