@@ -13,10 +13,17 @@ The settings are loaded from environment variables or .env file.
 """
 
 from typing import Any, Dict, Optional
+from pydantic import PostgresDsn, field_validator, ConfigDict, BaseModel
 from pydantic_settings import BaseSettings
-from pydantic import PostgresDsn, validator
+
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(
+        case_sensitive=True,
+        env_file=".env",
+        extra="allow"
+    )
+    
     PROJECT_NAME: str = "Lean Six Sigma RAG Chatbot"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
@@ -39,9 +46,22 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str
     
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
-        extra = "allow"  # Allow extra fields in the settings
+    @field_validator("DATABASE_URL")
+    def validate_database_url(cls, v: Optional[str]) -> Any:
+        if not v:
+            raise ValueError("DATABASE_URL must be set")
+        return v
+    
+    @field_validator("WEAVIATE_URL")
+    def validate_weaviate_url(cls, v: Optional[str]) -> Any:
+        if not v:
+            raise ValueError("WEAVIATE_URL must be set")
+        return v
+    
+    @field_validator("OPENAI_API_KEY")
+    def validate_openai_api_key(cls, v: Optional[str]) -> Any:
+        if not v:
+            raise ValueError("OPENAI_API_KEY must be set")
+        return v
 
 settings = Settings() 

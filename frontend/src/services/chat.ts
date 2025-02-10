@@ -15,8 +15,16 @@ export interface ChatMessage {
   query: string;
 }
 
+export interface ChatHistoryItem {
+  id: number;
+  query: string;
+  response: string;
+  created_at: string;
+}
+
 export interface ChatResponse {
   response: string;
+  history_id: number;
   remaining_queries: {
     daily_queries_remaining: number;
     daily_queries_limit: number;
@@ -58,6 +66,16 @@ export const setAuthToken = (token: string | null) => {
 export const sendMessage = async (message: ChatMessage): Promise<ChatResponse> => {
   try {
     const response = await api.post<ChatResponse>('/chat', message);
+    return response.data;
+  } catch (error) {
+    handleApiError(error);
+    throw error;
+  }
+};
+
+export const getChatHistory = async (): Promise<ChatHistoryItem[]> => {
+  try {
+    const response = await api.get<ChatHistoryItem[]>('/history');
     return response.data;
   } catch (error) {
     handleApiError(error);

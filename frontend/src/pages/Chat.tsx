@@ -21,33 +21,49 @@ import {
   Card,
   CardContent,
   useTheme,
+  Snackbar,
 } from '@mui/material';
-import { Send as SendIcon } from '@mui/icons-material';
+import { Send as SendIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sendMessage, getRemainingQueries, ChatResponse } from '../services/chat';
+import { sendMessage, getRemainingQueries, getChatHistory, ChatHistoryItem } from '../services/chat';
 import { useAuth } from '../hooks/useAuth';
 
-interface ChatMessageType {
-  id: number;
+interface ChatMessageType extends Omit<ChatHistoryItem, 'created_at'> {
   type: 'user' | 'bot';
-  content: string;
   timestamp: Date;
 }
 
 export default function Chat() {
   const [message, setMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessageType[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { token } = useAuth();
   const theme = useTheme();
   const queryClient = useQueryClient();
 
   // Get remaining queries
-  const { data: queryLimit } = useQuery({
+  const { data: queryLimit, isError: isQueryLimitError } = useQuery({
     queryKey: ['remainingQueries'],
     queryFn: getRemainingQueries,
     refetchInterval: 60000, // Refresh every minute
+  });
+
+  // Get chat history
+  const { data: historicalMessages, isLoading: isLoadingHistory } = useQuery({
+    queryKey: ['chatHistory'],
+    queryFn: getChatHistory,
+    onSuccess: (data) => {
+      const formattedHistory = data.map((msg) => ({
+        id: msg.id,
+        type: 'bot' as const,
+        query: msg.query,
+        response: msg.response,
+        timestamp: new Date(msg.created_at),
+      }));
+      setChatHistory(formattedHistory);
+    },
   });
 
   // Send message mutation
@@ -56,15 +72,22 @@ export default function Chat() {
     onSuccess: (data) => {
       // Add bot response to chat history
       const botMessage: ChatMessageType = {
-        id: chatHistory.length + 2,
+        id: data.history_id,
         type: 'bot',
-        content: data.response,
+        query: message,
+        response: data.response,
         timestamp: new Date(),
       };
       setChatHistory((prev) => [...prev, botMessage]);
       
       // Update remaining queries
       queryClient.setQueryData(['remainingQueries'], data.remaining_queries);
+      
+      // Clear any existing error
+      setError(null);
+    },
+    onError: (error: Error) => {
+      setError(error.message);
     },
   });
 
@@ -80,9 +103,10 @@ export default function Chat() {
 
     // Add user message to chat history
     const userMessage: ChatMessageType = {
-      id: chatHistory.length + 1,
+      id: Date.now(), // Temporary ID
       type: 'user',
-      content: message,
+      query: message,
+      response: message, // For user messages, response is the same as query
       timestamp: new Date(),
     };
     setChatHistory((prev) => [...prev, userMessage]);
@@ -93,6 +117,18 @@ export default function Chat() {
     // Send message to API
     sendMessageMutation.mutate({ query: message });
   };
+
+  const handleErrorClose = () => {
+    setError(null);
+  };
+
+  if (isLoadingHistory) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ height: 'calc(100vh - 100px)', display: 'flex', flexDirection: 'column' }}>
@@ -108,6 +144,13 @@ export default function Chat() {
             sx={{ height: 8, borderRadius: 4 }}
           />
         </Paper>
+      )}
+
+      {/* Query limit error */}
+      {isQueryLimitError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Unable to fetch query limit information
+        </Alert>
       )}
 
       {/* Chat messages */}
@@ -137,9 +180,9 @@ export default function Chat() {
                 color={msg.type === 'user' ? 'primary.contrastText' : 'text.primary'}
               >
                 {msg.type === 'bot' ? (
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown>{msg.response}</ReactMarkdown>
                 ) : (
-                  msg.content
+                  msg.query
                 )}
               </Typography>
               <Typography
@@ -157,12 +200,6 @@ export default function Chat() {
           <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
             <CircularProgress size={24} />
           </Box>
-        )}
-        
-        {sendMessageMutation.isError && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {sendMessageMutation.error.message}
-          </Alert>
         )}
         
         <div ref={messagesEndRef} />
@@ -197,6 +234,18 @@ export default function Chat() {
           <SendIcon />
         </IconButton>
       </Paper>
+
+      {/* Error snackbar */}
+      <Snackbar
+        open={!!error}
+        autoHideDuration={6000}
+        onClose={handleErrorClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleErrorClose} severity="error" sx={{ width: '100%' }}>
+          {error}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 } 
