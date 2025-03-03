@@ -59,10 +59,11 @@ async def get_chat_history(
 
 @router.get("/remaining", response_model=dict)
 def get_remaining_query_count(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ) -> dict:
     """Get the number of queries remaining for the current user."""
-    return get_remaining_queries(current_user)
+    return get_remaining_queries(current_user, db)
 
 
 @router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK)
@@ -103,7 +104,7 @@ async def chat(
         increment_user_query_count(current_user, db)
         
         # Get remaining queries
-        remaining = get_remaining_queries(current_user)
+        remaining = get_remaining_queries(current_user, db)
 
         return ChatResponse(
             response=response_text,

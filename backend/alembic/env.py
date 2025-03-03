@@ -27,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.db.base import Base
 from app.core.config import settings
 from app.models.user import User
-from app.models.chat import ChatHistory
+from app.models.chat_history import ChatHistory
 
 # this is the Alembic Config object
 config = context.config

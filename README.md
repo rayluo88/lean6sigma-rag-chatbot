@@ -176,11 +176,12 @@ VITE_API_URL=http://localhost:8000
   - Comprehensive error handling and logging
   - Token limit handling with fallbacks
   - Integration tests passing
+  - Troubleshooting tools and diagnostics added
 
 - **Database Setup:**
   - PostgreSQL is configured and running using Docker Compose
   - Initial database migrations have been successfully created and applied using Alembic
-  - Tables `users`, `chat_history`, and `alembic_version` are set up
+  - Tables `users`, `chat_history`, `subscription_plans`, and `user_subscriptions` are set up
   - Database connection pooling implemented for optimal performance
 
 - **Authentication System:**
@@ -210,6 +211,7 @@ VITE_API_URL=http://localhost:8000
   - Integration tests passing for chat endpoints
   - Error handling and logging throughout
   - Token limit handling implemented
+  - Diagnostic endpoints for troubleshooting
 
 - **Documentation System:**
   - Structured knowledge base organization completed
@@ -231,6 +233,7 @@ VITE_API_URL=http://localhost:8000
     - Documentation retrieval
     - RAG service operations
   - GitHub Actions CI/CD setup pending
+  - Diagnostic tools for troubleshooting added
 
 - **Free Tier Implementation:**
   - Query limiting functionality (10 queries per day)
@@ -238,11 +241,39 @@ VITE_API_URL=http://localhost:8000
   - Endpoint to check remaining queries
   - Rate limiting with appropriate error messages
 
-- **Next Steps:**
-  - Add more LSS content to knowledge base
-  - Implement subscription management
-  - Add advanced analytics
-  - Set up CI/CD pipeline
-  - Enhance error monitoring and logging
-  - Add user feedback collection
-  - Implement advanced visualization tools 
+- **Subscription Management:**
+  - Subscription plans model and database tables
+  - User subscription tracking and management
+  - Tiered access with different query limits
+  - Subscription API endpoints:
+    - List available plans (`/api/v1/subscription/plans`)
+    - View current subscription (`/api/v1/subscription/my`)
+    - Subscribe to a plan (`/api/v1/subscription/subscribe`)
+    - Cancel subscription (`/api/v1/subscription/my/cancel`)
+  - Admin endpoints for plan management
+  - Payment processing integration (placeholder)
+  - Free plan auto-assignment for new users
+
+## Known Issues
+
+- **RAG Service Connectivity:**
+  - Intermittent issues with the RAG service response generation
+  - Weaviate vector database is running correctly but may require additional configuration
+  - OpenAI API integration may need troubleshooting in certain environments
+  - Error handling in the RAG service may need enhancement for better diagnostics
+
+- **Testing and Debugging:**
+  - Added diagnostic endpoints and tools for troubleshooting
+  - Enhanced logging for better error identification
+  - Documented common issues and their solutions
+  - Created step-by-step testing guide for all features
+
+## Next Steps
+
+- Add more LSS content to knowledge base
+- Resolve RAG service connectivity issues
+- Add advanced analytics
+- Set up CI/CD pipeline
+- Enhance error monitoring and logging
+- Add user feedback collection
+- Implement advanced visualization tools 

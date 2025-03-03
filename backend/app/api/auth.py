@@ -23,6 +23,9 @@ from app.db.base import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, Token
 
+# Import the subscription service
+from app.services.subscription import SubscriptionService
+
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,13 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    # Assign the free plan to the new user
+    try:
+        SubscriptionService.assign_free_plan(db, new_user)
+        logger.info("Free plan assigned to new user: %s", new_user.email)
+    except Exception as e:
+        logger.error("Failed to assign free plan to user %s: %s", new_user.email, str(e))
     
     logger.info("User registered successfully: %s", new_user.email)
     return new_user
@@ -93,4 +103,19 @@ async def get_current_user(
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
-    return user 
+    return user
+
+
+async def get_current_admin(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Dependency to get the current admin user.
+    Raises an exception if the user is not an admin.
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform this action"
+        )
+    return current_user 

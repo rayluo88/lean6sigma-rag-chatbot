@@ -40,7 +40,8 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    chat_history = relationship("ChatHistory", back_populates="user")
+    chat_history = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
+    subscriptions = relationship("UserSubscription", back_populates="user")
     
     def __repr__(self):
         return f"<User {self.email}>" 
