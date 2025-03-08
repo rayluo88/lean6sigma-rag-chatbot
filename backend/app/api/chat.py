@@ -10,7 +10,7 @@ This module provides endpoints for:
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, constr
-from typing import List
+from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 
@@ -39,10 +39,16 @@ class ChatHistoryResponse(BaseModel):
         from_attributes = True
 
 
+class SourceDocument(BaseModel):
+    content: str
+    metadata: Dict[str, Any]
+
+
 class ChatResponse(BaseModel):
     response: str
     remaining_queries: dict
     history_id: int
+    sources: Optional[List[SourceDocument]] = []
 
 
 @router.get("/history", response_model=List[ChatHistoryResponse])
@@ -62,8 +68,8 @@ def get_remaining_query_count(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> dict:
-    """Get the number of queries remaining for the current user."""
-    return get_remaining_queries(current_user, db)
+    """Get remaining query count for the current user."""
+    return get_remaining_queries(current_user.id, db)
 
 
 @router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK)
@@ -72,49 +78,60 @@ async def chat(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Process a user query through the RAG-based chatbot:
-    1. Check user's query limits
-    2. Retrieve context from the Lean Six Sigma knowledge base
-    3. Generate a response using OpenAI
-    4. Store the chat history in the database
-    5. Return the generated response and remaining queries
-    """
+    """Process a chat request and return a response."""
     try:
-        # Check if user has exceeded their query limits
-        check_user_limits(current_user, db)
-
-        # Log the user query
-        logger.info("User %s submitted query: %s", current_user.email, chat_request.query)
-
+        # Check if user has remaining queries
+        limits = check_user_limits(current_user.id, db)
+        if not limits["can_query"]:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Query limit reached. Please try again tomorrow or upgrade your plan."
+            )
+        
+        # Get user's chat history for context
+        chat_history = []
+        history_records = db.query(ChatHistory).filter(
+            ChatHistory.user_id == current_user.id
+        ).order_by(ChatHistory.created_at.desc()).limit(5).all()
+        
+        for record in reversed(history_records):
+            chat_history.append({"role": "user", "content": record.query})
+            chat_history.append({"role": "assistant", "content": record.response})
+        
         # Generate response using RAG service
-        response_text = await rag_service.generate_response(chat_request.query)
-
-        # Save chat history in the database
+        result = await rag_service.generate_response(chat_request.query, chat_history)
+        response_text = result["response"]
+        sources = result.get("sources", [])
+        
+        # Store chat in history
         chat_history_entry = ChatHistory(
-            user_id=current_user.id, 
-            query=chat_request.query, 
+            user_id=current_user.id,
+            query=chat_request.query,
             response=response_text
         )
         db.add(chat_history_entry)
         db.commit()
         db.refresh(chat_history_entry)
         
-        # Increment user's query count
-        increment_user_query_count(current_user, db)
+        # Increment query count
+        increment_user_query_count(current_user.id, db)
         
-        # Get remaining queries
-        remaining = get_remaining_queries(current_user, db)
-
+        # Get updated query limits
+        remaining = get_remaining_queries(current_user.id, db)
+        
         return ChatResponse(
             response=response_text,
             remaining_queries=remaining,
-            history_id=chat_history_entry.id
+            history_id=chat_history_entry.id,
+            sources=sources
         )
-        
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        logger.error("Error processing chat request: %s", str(e))
+        logger.error(f"Error processing chat request: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing your request. Please try again."
+            detail="An error occurred while processing your request."
         ) 

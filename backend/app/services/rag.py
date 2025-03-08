@@ -5,19 +5,36 @@ This module handles:
 - Document chunking and embedding
 - Vector storage in Weaviate
 - Context retrieval
-- OpenAI integration for response generation
+- LangChain integration for response generation
 """
 
 import os
 from typing import List, Dict, Any, Optional
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
+import time
+
+# LangChain imports
+from langchain_community.vectorstores import Weaviate
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.chat_models import ChatOpenAI
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate, ChatPromptTemplate
+from langchain.schema import Document
+
+# Weaviate and OpenAI imports
 import weaviate
 from openai import OpenAI
 import tiktoken
-from pathlib import Path
-import logging
 from weaviate.exceptions import UnexpectedStatusCodeException, WeaviateBaseError
 
 from app.core.config import settings
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -25,295 +42,398 @@ logger = logging.getLogger(__name__)
 # Constants
 CHUNK_OVERLAP = 200
 MAX_TOKENS = 4000
-EMBEDDING_MODEL = "text-embedding-3-small"
-COMPLETION_MODEL = "gpt-3.5-turbo"
+EMBEDDING_MODEL = "text-embedding-ada-002"  # Use stable model
+COMPLETION_MODEL = "gpt-3.5-turbo-0125"    # Use specific model version
+OPENAI_API_BASE = "https://api.openai.com/v1"  # OpenAI's default API endpoint
+MAX_RETRIES = 3  # Maximum number of retries for operations
+RETRY_DELAY = 1  # Delay between retries in seconds
 
 class RAGService:
     def __init__(self):
-        """Initialize RAG service with Weaviate and OpenAI clients."""
+        """Initialize RAG service with Weaviate and LangChain components."""
         # Service configuration
         self.CHUNK_SIZE = 1000
+        self.weaviate_available = False
+        self.vector_store = None
+        self.qa_chain = None
         
         try:
-            # Initialize clients
-            self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            self.weaviate_client = weaviate.Client(
-                url=settings.WEAVIATE_URL,
-                additional_headers={
-                    "X-OpenAI-Api-Key": settings.OPENAI_API_KEY
-                }
+            # Initialize OpenAI client
+            self.openai_client = OpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                base_url=OPENAI_API_BASE,
+                timeout=60.0
             )
-            logger.info("Initialized RAG service with Weaviate and OpenAI clients")
             
-            # Ensure collection exists
-            self._create_collection()
+            # Initialize LangChain components
+            self.embeddings = OpenAIEmbeddings(
+                model=EMBEDDING_MODEL,
+                openai_api_key=settings.OPENAI_API_KEY,
+                base_url=OPENAI_API_BASE,
+                timeout=60.0
+            )
+            
+            self.text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP
+            )
+            
+            # Initialize LLM with proper configuration
+            self.llm = ChatOpenAI(
+                model_name=COMPLETION_MODEL,
+                temperature=0.2,
+                openai_api_key=settings.OPENAI_API_KEY,
+                base_url=OPENAI_API_BASE,
+                timeout=60.0,
+                streaming=False
+            )
+            logger.info(f"Using OpenAI chat model at {OPENAI_API_BASE}")
+            
+            # Create conversation memory (needed regardless of Weaviate availability)
+            self.memory = ConversationBufferMemory(
+                memory_key="chat_history",
+                return_messages=True
+            )
+            
+            # Initialize Weaviate client with retries
+            self._initialize_weaviate()
+            
+            logger.info("Initialized RAG service with LangChain components")
         except Exception as e:
             logger.error(f"Failed to initialize RAG service: {e}")
             raise
+
+    def _initialize_weaviate(self):
+        """Initialize Weaviate client with retries."""
+        for attempt in range(MAX_RETRIES):
+            try:
+                # Try without auth first (for local development)
+                self.weaviate_client = weaviate.Client(
+                    url=settings.WEAVIATE_URL,
+                    timeout_config=(5, 60)  # (connect_timeout, read_timeout)
+                )
+                
+                # Test connection
+                self.weaviate_client.schema.get()
+                logger.info("Connected to Weaviate without authentication")
+                self.weaviate_available = True
+                break
+                
+            except Exception as e:
+                logger.warning(f"Failed to connect to Weaviate without auth (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                
+                # Try with API key if available
+                if settings.WEAVIATE_API_KEY:
+                    try:
+                        auth_config = weaviate.auth.AuthApiKey(api_key=settings.WEAVIATE_API_KEY)
+                        self.weaviate_client = weaviate.Client(
+                            url=settings.WEAVIATE_URL,
+                            auth_client_secret=auth_config,
+                            additional_headers={
+                                "X-OpenAI-Api-Key": settings.OPENAI_API_KEY
+                            },
+                            timeout_config=(5, 60)
+                        )
+                        
+                        # Test connection
+                        self.weaviate_client.schema.get()
+                        logger.info("Connected to Weaviate with API key authentication")
+                        self.weaviate_available = True
+                        break
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to connect to Weaviate with API key (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+                else:
+                    logger.warning("Failed to connect to Weaviate after all retries. Using fallback mode without RAG.")
+                    self.weaviate_available = False
         
+        # Only proceed with Weaviate setup if connection is successful
+        if self.weaviate_available:
+            try:
+                # Ensure collection exists
+                self._create_collection()
+                
+                # Initialize vector store
+                self.vector_store = Weaviate(
+                    client=self.weaviate_client,
+                    index_name="LSSDocument",
+                    text_key="content",
+                    embedding=self.embeddings,
+                    by_text=False,
+                    retrieval_params={"distance_metric": "cosine"}
+                )
+                
+                # Create retrieval chain
+                self.qa_chain = ConversationalRetrievalChain.from_llm(
+                    llm=self.llm,
+                    retriever=self.vector_store.as_retriever(
+                        search_kwargs={"k": 3}
+                    ),
+                    memory=self.memory,
+                    return_source_documents=True,
+                    verbose=True
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize vector store: {e}")
+                self.weaviate_available = False
+                self.vector_store = None
+                self.qa_chain = None
+        else:
+            logger.warning("Weaviate is not available. Using fallback mode without RAG.")
+
     def _create_collection(self):
         """Create or get Weaviate collection for LSS documents."""
+        if not self.weaviate_available:
+            logger.warning("Weaviate is not available. Cannot create collection.")
+            return
+            
         class_obj = {
             "class": "LSSDocument",
-            "vectorizer": "text2vec-openai",
-            "moduleConfig": {
-                "text2vec-openai": {
-                    "model": EMBEDDING_MODEL,
-                    "modelVersion": "3",
-                    "type": "text"
-                }
-            },
             "properties": [
                 {
                     "name": "content",
                     "dataType": ["text"],
-                    "description": "Document content",
-                    "moduleConfig": {
-                        "text2vec-openai": {
-                            "skip": False,
-                            "vectorizePropertyName": False
-                        }
-                    }
+                    "description": "The content of the document chunk"
                 },
                 {
-                    "name": "category",
-                    "dataType": ["text"],
-                    "description": "Document category",
-                    "moduleConfig": {
-                        "text2vec-openai": {
-                            "skip": True,
-                            "vectorizePropertyName": False
-                        }
-                    }
+                    "name": "title",
+                    "dataType": ["string"],
+                    "description": "The title of the document"
                 },
                 {
                     "name": "source",
-                    "dataType": ["text"],
-                    "description": "Document source path",
-                    "moduleConfig": {
-                        "text2vec-openai": {
-                            "skip": True,
-                            "vectorizePropertyName": False
-                        }
-                    }
+                    "dataType": ["string"],
+                    "description": "The source of the document"
+                },
+                {
+                    "name": "category",
+                    "dataType": ["string"],
+                    "description": "The category of the document"
                 }
-            ]
+            ],
+            "vectorizer": "text2vec-openai",
+            "moduleConfig": {
+                "text2vec-openai": {
+                    "model": EMBEDDING_MODEL,
+                    "modelVersion": "latest",
+                    "type": "text"
+                }
+            }
         }
         
         try:
             # Check if class exists
-            self.weaviate_client.schema.get("LSSDocument")
-            logger.info("LSSDocument collection already exists")
-        except UnexpectedStatusCodeException:
-            try:
-                # Create new class if it doesn't exist
+            if not self.weaviate_client.schema.exists("LSSDocument"):
                 self.weaviate_client.schema.create_class(class_obj)
-                logger.info("Created LSSDocument collection")
-            except WeaviateBaseError as e:
-                logger.error(f"Failed to create collection: {e}")
-                raise
+                logger.info("Created LSSDocument class in Weaviate")
+            else:
+                logger.info("LSSDocument class already exists in Weaviate")
         except Exception as e:
-            logger.error(f"Unexpected error accessing schema: {e}")
-            raise
-
-    def _chunk_text(self, text: str) -> List[str]:
-        """Split text into chunks with overlap."""
-        if not text.strip():
-            logger.warning("Received empty text for chunking")
-            return []
-            
-        chunks = []
-        start = 0
-        
-        while start < len(text):
-            end = start + self.CHUNK_SIZE
-            # If this is not the first chunk, include overlap
-            if start > 0:
-                start = start - CHUNK_OVERLAP
-            chunk = text[start:end].strip()
-            if chunk:  # Only add non-empty chunks
-                chunks.append(chunk)
-            start = end
-        
-        logger.debug(f"Split text into {len(chunks)} chunks")
-        return chunks
+            logger.error(f"Failed to create Weaviate class: {e}")
+            self.weaviate_available = False  # Mark Weaviate as unavailable if we can't create the class
+            self.vector_store = None
+            self.qa_chain = None
 
     def _count_tokens(self, text: str) -> int:
-        """Count tokens in text using tiktoken."""
+        """Count the number of tokens in a text string."""
         try:
             encoding = tiktoken.encoding_for_model(COMPLETION_MODEL)
             return len(encoding.encode(text))
         except Exception as e:
             logger.error(f"Error counting tokens: {e}")
-            # Return a conservative estimate
-            return len(text.split()) * 2
+            # Fallback to approximate count
+            return len(text) // 4
 
     def _get_metadata_value(self, metadata: Dict[str, Any], key: str, default: str = "") -> str:
-        """Safely get metadata value with default."""
-        try:
-            value = metadata.get(key, default)
-            return str(value) if value is not None else default
-        except Exception as e:
-            logger.warning(f"Error getting metadata value for {key}: {e}")
-            return default
+        """Safely extract metadata value with a default fallback."""
+        return str(metadata.get(key, default))
 
     async def index_document(self, content: str, metadata: Dict[str, Any]):
-        """Index a document in Weaviate."""
+        """
+        Index a document into the vector store.
+        
+        Args:
+            content: The document content
+            metadata: Document metadata including title, source, category
+        """
         try:
-            # Handle empty content
-            if not content.strip():
-                logger.warning("Received empty content for indexing")
-                return
-            
-            chunks = self._chunk_text(content)
-            logger.info(f"Indexing document with {len(chunks)} chunks")
-            
-            if not chunks:
-                logger.warning("No valid chunks generated from content")
-                return
-            
-            # Get metadata values safely
-            category = self._get_metadata_value(metadata, "category")
-            source = self._get_metadata_value(metadata, "source")
-            
-            # Create objects in batch
-            with self.weaviate_client.batch as batch:
-                for i, chunk in enumerate(chunks):
-                    try:
-                        batch.add_data_object(
-                            data_object={
-                                "content": chunk,
-                                "category": category,
-                                "source": source
-                            },
-                            class_name="LSSDocument"
-                        )
-                        logger.debug(f"Indexed chunk {i+1}/{len(chunks)}")
-                    except Exception as e:
-                        logger.error(f"Error indexing chunk {i}: {e}")
-                        raise
-            
-            logger.info(f"Successfully indexed document from {source or 'unknown'}")
-            
-        except Exception as e:
-            logger.error(f"Failed to index document: {e}")
-            raise
-
-    def _extract_object_data(self, obj: Dict[str, Any]) -> Dict[str, str]:
-        """Safely extract data from Weaviate object."""
-        return {
-            "content": str(obj.get("content", "")),
-            "category": str(obj.get("category", "")),
-            "source": str(obj.get("source", ""))
-        }
-
-    async def retrieve_context(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
-        """Retrieve relevant context from Weaviate based on query."""
-        try:
-            if not query.strip():
-                logger.warning("Received empty query")
-                return []
+            # Check if Weaviate is available
+            if not self.weaviate_available or not self.vector_store:
+                logger.warning("Weaviate is not available. Cannot index document.")
+                return False
                 
-            response = (
-                self.weaviate_client.query
-                .get("LSSDocument", ["content", "category", "source"])
-                .with_near_text({
-                    "concepts": [query]
-                })
-                .with_limit(limit)
-                .with_additional(["distance"])
-                .do()
+            # Split text into chunks
+            docs = self.text_splitter.create_documents(
+                texts=[content],
+                metadatas=[metadata]
             )
             
-            if response and "data" in response and "Get" in response["data"]:
-                objects = response["data"]["Get"]["LSSDocument"]
-                contexts = [
-                    self._extract_object_data(obj)
-                    for obj in objects
-                ]
-                logger.info(f"Retrieved {len(contexts)} contexts for query: {query}")
-                return contexts
+            # Convert to LangChain documents
+            langchain_docs = [
+                Document(
+                    page_content=doc.page_content,
+                    metadata={
+                        "title": self._get_metadata_value(doc.metadata, "title"),
+                        "source": self._get_metadata_value(doc.metadata, "source"),
+                        "category": self._get_metadata_value(doc.metadata, "category")
+                    }
+                )
+                for doc in docs
+            ]
             
-            logger.warning(f"No contexts found for query: {query}")
-            return []
+            # Add documents to vector store with retries
+            for attempt in range(MAX_RETRIES):
+                try:
+                    self.vector_store.add_documents(langchain_docs)
+                    logger.info(f"Indexed document: {metadata.get('title', 'Untitled')} with {len(docs)} chunks")
+                    return True
+                except Exception as e:
+                    logger.error(f"Error indexing document (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                    if attempt < MAX_RETRIES - 1:
+                        time.sleep(RETRY_DELAY)
+                    else:
+                        return False
+        except Exception as e:
+            logger.error(f"Error indexing document: {e}")
+            return False
+
+    async def retrieve_context(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """
+        Retrieve relevant context for a query.
+        
+        Args:
+            query: The user query
+            limit: Maximum number of context chunks to retrieve
             
+        Returns:
+            List of context chunks with metadata
+        """
+        try:
+            # Check if Weaviate is available
+            if not self.weaviate_available or not self.vector_store:
+                logger.warning("Weaviate is not available. Cannot retrieve context.")
+                return []
+                
+            # Use LangChain retriever to get relevant documents with retries
+            for attempt in range(MAX_RETRIES):
+                try:
+                    docs = self.vector_store.similarity_search(
+                        query=query,
+                        k=limit
+                    )
+                    
+                    # Format results
+                    results = []
+                    for doc in docs:
+                        results.append({
+                            "content": doc.page_content,
+                            "metadata": doc.metadata
+                        })
+                    
+                    logger.info(f"Retrieved {len(results)} context chunks for query: {query}")
+                    return results
+                except Exception as e:
+                    logger.error(f"Error retrieving context (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                    if attempt < MAX_RETRIES - 1:
+                        time.sleep(RETRY_DELAY)
+                    else:
+                        return []
         except Exception as e:
             logger.error(f"Error retrieving context: {e}")
             return []
 
-    def _build_prompt(self, query: str, contexts: List[Dict[str, Any]]) -> str:
-        """Build prompt for OpenAI with query and retrieved contexts."""
+    async def generate_response(self, query: str, chat_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        Generate a response to a user query using LangChain.
+        
+        Args:
+            query: The user query
+            chat_history: Optional chat history for context
+            
+        Returns:
+            Dictionary containing response text and source documents
+        """
         try:
-            context_str = "\n\n".join([
-                f"Context from {ctx['source'] or 'unknown'} ({ctx['category'] or 'uncategorized'}):\n{ctx['content']}"
-                for ctx in contexts
-            ])
+            # Reset memory for new conversation if no history provided
+            if not chat_history:
+                self.memory.clear()
+            else:
+                # Format history for LangChain memory
+                for message in chat_history[-5:]:  # Use last 5 messages
+                    if message.get("role") == "user":
+                        self.memory.chat_memory.add_user_message(message.get("content", ""))
+                    else:
+                        self.memory.chat_memory.add_ai_message(message.get("content", ""))
             
-            prompt = f"""You are an expert Lean Six Sigma consultant. Use the following context to answer the user's question.
-            Be specific and cite relevant methodologies, tools, or concepts from the context when applicable.
-            If you're not sure about something, be honest about it.
-
-            Context:
-            {context_str}
-
-            User Question: {query}
-
-            Answer:"""
+            # Generate response using LangChain
+            if self.weaviate_available and self.qa_chain:
+                # Use RAG with Weaviate
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        result = self.qa_chain({"question": query})
+                        
+                        # Extract response and sources
+                        response_text = result.get("answer", "")
+                        source_documents = result.get("source_documents", [])
+                        
+                        # Format sources for return
+                        sources = []
+                        for doc in source_documents:
+                            sources.append({
+                                "content": doc.page_content,
+                                "metadata": doc.metadata
+                            })
+                        break
+                    except Exception as e:
+                        logger.error(f"Error using RAG chain (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(RETRY_DELAY)
+                            # Try to reinitialize Weaviate connection
+                            self._initialize_weaviate()
+                        else:
+                            # Fall back to direct LLM if all retries fail
+                            logger.warning("Falling back to direct LLM after RAG failures")
+                            return await self._generate_fallback_response(query)
+            else:
+                # Use direct LLM without RAG
+                return await self._generate_fallback_response(query)
             
-            return prompt
-            
-        except Exception as e:
-            logger.error(f"Error building prompt: {e}")
-            # Return a simplified prompt without context
-            return f"User Question: {query}\n\nAnswer:"
-
-    async def generate_response(self, query: str) -> str:
-        """Generate a response using RAG pipeline."""
-        try:
-            if not query.strip():
-                logger.warning("Received empty query")
-                return "I apologize, but I cannot generate a response for an empty question. Please provide a specific question about Lean Six Sigma."
-            
-            # Retrieve relevant contexts
-            contexts = await self.retrieve_context(query)
-            
-            if not contexts:
-                logger.warning("No context found for query, returning fallback response")
-                return "I apologize, but I don't have enough context to provide a specific answer about that aspect of Lean Six Sigma. Could you please rephrase your question or ask about a different topic?"
-            
-            # Build prompt with contexts
-            prompt = self._build_prompt(query, contexts)
-            
-            # Check token count
-            token_count = self._count_tokens(prompt)
-            if token_count > MAX_TOKENS:
-                logger.warning(f"Prompt exceeds token limit ({token_count} > {MAX_TOKENS}), truncating contexts")
-                # Truncate contexts if needed
-                while token_count > MAX_TOKENS and contexts:
-                    contexts.pop()
-                    prompt = self._build_prompt(query, contexts)
-                    token_count = self._count_tokens(prompt)
-                
-                if not contexts:
-                    logger.warning("All contexts removed due to token limit")
-                    return "I apologize, but the context required to answer your question is too large. Could you please ask a more specific question?"
-            
-            # Generate response using OpenAI
-            response = self.openai_client.chat.completions.create(
-                model=COMPLETION_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are an expert Lean Six Sigma consultant providing accurate and helpful advice."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=1000
-            )
-            
-            return response.choices[0].message.content
-            
+            logger.info(f"Generated response for query: {query}")
+            return {
+                "response": response_text,
+                "sources": sources
+            }
         except Exception as e:
             logger.error(f"Error generating response: {e}")
-            return "I apologize, but I encountered an error while processing your question. Please try again later."
+            return {
+                "response": "I'm sorry, I encountered an error while processing your request. Please try again later.",
+                "sources": []
+            }
 
-# Create singleton instance
+    async def _generate_fallback_response(self, query: str) -> Dict[str, Any]:
+        """Generate a response using direct LLM when RAG is unavailable."""
+        try:
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert Lean Six Sigma consultant providing accurate and helpful advice.
+                Answer the user's question based on your knowledge of Lean Six Sigma methodologies, tools, and concepts.
+                If you don't know the answer, be honest about it."""),
+                ("human", "{question}")
+            ])
+            chain = prompt | self.llm
+            response = chain.invoke({"question": query})
+            return {
+                "response": response.content,
+                "sources": []  # No sources in fallback mode
+            }
+        except Exception as e:
+            logger.error(f"Error generating fallback response: {e}")
+            return {
+                "response": "I'm sorry, I encountered an error while processing your request. Please try again later.",
+                "sources": []
+            }
+
+# Initialize singleton service
 rag_service = RAGService() 

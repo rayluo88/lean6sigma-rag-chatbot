@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from typing import Dict, Any, Union
 
 from app.models.user import User
 from app.models.subscription import UserSubscription, SubscriptionStatus
@@ -23,28 +24,39 @@ FREE_TIER_DAILY_LIMIT = 10
 FREE_TIER_MONTHLY_LIMIT = 100
 
 
-def get_user_subscription(user: User, db: Session):
+def get_user_subscription(user_id: int, db: Session) -> Union[UserSubscription, None]:
     """
     Get the active subscription for a user.
     Returns None if no active subscription is found.
-    """
-    if not user.subscriptions:
-        return None
     
+    Args:
+        user_id: The user ID
+        db: Database session
+        
+    Returns:
+        The active subscription or None
+    """
     # Get the most recent active subscription
     subscription = db.query(UserSubscription).filter(
-        UserSubscription.user_id == user.id,
+        UserSubscription.user_id == user_id,
         UserSubscription.status == SubscriptionStatus.ACTIVE
     ).order_by(desc(UserSubscription.created_at)).first()
     
     return subscription
 
 
-def get_user_limits(user: User, db: Session):
+def get_user_limits(user_id: int, db: Session) -> Dict[str, int]:
     """
     Get the query limits for a user based on their subscription.
+    
+    Args:
+        user_id: The user ID
+        db: Database session
+        
+    Returns:
+        Dictionary with limit information
     """
-    subscription = get_user_subscription(user, db)
+    subscription = get_user_subscription(user_id, db)
     
     if not subscription:
         return {
@@ -60,60 +72,107 @@ def get_user_limits(user: User, db: Session):
     }
 
 
-def check_user_limits(user: User, db: Session) -> None:
+def check_user_limits(user_id: int, db: Session) -> Dict[str, Any]:
     """
     Check if a user has exceeded their query limits.
-    Raises HTTPException if limits are exceeded.
-    """
-    # Get user limits based on subscription
-    limits = get_user_limits(user, db)
     
-    # Reset counters if it's a new day
-    if user.last_query_time:
-        last_query_date = user.last_query_time.date()
-        today = datetime.utcnow().date()
+    Args:
+        user_id: The user ID
+        db: Database session
         
-        if last_query_date < today:
-            user.queries_count = 0
+    Returns:
+        Dictionary with limit information and whether the user can query
+        
+    Raises:
+        HTTPException: If the user has exceeded their limits
+    """
+    # Get the user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Get user limits
+    limits = get_user_limits(user_id, db)
     
     # Check daily limit
-    if user.queries_count >= limits["daily_limit"]:
-        subscription = get_user_subscription(user, db)
-        
-        if subscription:
-            plan_name = subscription.plan.name
-            message = f"Daily limit of {limits['daily_limit']} queries for your {plan_name} plan has been reached."
-        else:
-            message = f"Free tier daily limit of {FREE_TIER_DAILY_LIMIT} queries exceeded. Please upgrade your plan."
-        
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=message
-        )
-
-
-def increment_user_query_count(user: User, db: Session) -> None:
-    """
-    Increment the user's query count and update last query time.
-    """
-    user.queries_count += 1
-    user.last_query_time = datetime.utcnow()
-    db.commit()
-
-
-def get_remaining_queries(user: User, db: Session) -> dict:
-    """
-    Get the number of remaining queries for the user.
-    """
-    limits = get_user_limits(user, db)
-    daily_remaining = max(0, limits["daily_limit"] - user.queries_count)
+    today = datetime.now().date()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
     
-    subscription = get_user_subscription(user, db)
-    plan_name = "Free" if not subscription else subscription.plan.name
+    daily_count = user.daily_query_count or 0
+    
+    # Check monthly limit
+    month_start = datetime(today.year, today.month, 1)
+    next_month = today.month + 1 if today.month < 12 else 1
+    next_month_year = today.year if today.month < 12 else today.year + 1
+    month_end = datetime(next_month_year, next_month, 1) - timedelta(days=1)
+    
+    monthly_count = user.monthly_query_count or 0
+    
+    # Determine if user can query
+    can_query = (daily_count < limits["daily_limit"]) and (monthly_count < limits["monthly_limit"])
     
     return {
-        "daily_queries_remaining": daily_remaining,
-        "daily_queries_limit": limits["daily_limit"],
-        "plan_name": plan_name,
-        "last_query_time": user.last_query_time
+        "can_query": can_query,
+        "daily_count": daily_count,
+        "monthly_count": monthly_count,
+        "daily_limit": limits["daily_limit"],
+        "monthly_limit": limits["monthly_limit"]
+    }
+
+
+def increment_user_query_count(user_id: int, db: Session) -> None:
+    """
+    Increment a user's query count.
+    
+    Args:
+        user_id: The user ID
+        db: Database session
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        user.daily_query_count = (user.daily_query_count or 0) + 1
+        user.monthly_query_count = (user.monthly_query_count or 0) + 1
+        db.commit()
+
+
+def get_remaining_queries(user_id: int, db: Session) -> Dict[str, Any]:
+    """
+    Get the number of queries remaining for a user.
+    
+    Args:
+        user_id: The user ID
+        db: Database session
+        
+    Returns:
+        Dictionary with remaining query information
+    """
+    # Get the user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {
+            "daily_remaining": 0,
+            "monthly_remaining": 0,
+            "daily_limit": FREE_TIER_DAILY_LIMIT,
+            "monthly_limit": FREE_TIER_MONTHLY_LIMIT
+        }
+    
+    # Get user limits
+    limits = get_user_limits(user_id, db)
+    
+    # Calculate remaining queries
+    daily_count = user.daily_query_count or 0
+    monthly_count = user.monthly_query_count or 0
+    
+    daily_remaining = max(0, limits["daily_limit"] - daily_count)
+    monthly_remaining = max(0, limits["monthly_limit"] - monthly_count)
+    
+    return {
+        "daily_remaining": daily_remaining,
+        "monthly_remaining": monthly_remaining,
+        "daily_limit": limits["daily_limit"],
+        "monthly_limit": limits["monthly_limit"]
     } 

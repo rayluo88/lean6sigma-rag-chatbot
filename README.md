@@ -11,6 +11,7 @@ A RAG-based AI chatbot system focused on Lean Six Sigma methodology, providing e
 - **Pydantic**: Data validation using Python type annotations
 - **LangChain**: Framework for developing applications powered by language models
 - **OpenAI**: For RAG implementation and text embeddings
+- **Gradio**: For building interactive UI components for the chatbot
 
 ### Frontend
 - **React 18**: UI library for building user interfaces
@@ -20,6 +21,7 @@ A RAG-based AI chatbot system focused on Lean Six Sigma methodology, providing e
 - **React Query**: For server state management
 - **Zustand**: For client state management
 - **React Router**: For application routing
+- **Gradio**: Alternative web interface for the chatbot
 
 ### Databases
 - **PostgreSQL**: Primary relational database
@@ -44,6 +46,7 @@ A RAG-based AI chatbot system focused on Lean Six Sigma methodology, providing e
 │       ├── schemas/    # Schema definitions
 │       ├── services/   # Business logic
 │       └── utils/      # Utility functions
+│       └── gradio_ui.py # Gradio UI implementation
 ├── frontend/
 │   └── src/
 │       ├── components/ # Reusable React components
@@ -59,6 +62,30 @@ A RAG-based AI chatbot system focused on Lean Six Sigma methodology, providing e
     ├── case_studies/
     └── templates/
 ```
+
+## Available Interfaces
+
+The project provides two user interfaces:
+
+1. **React Frontend (Production UI)**
+   - URL: http://localhost:3000
+   - Features:
+     - Full authentication support
+     - Integration with all app features
+     - Material-UI based design
+     - Query limit tracking
+     - Chat history
+     - User profile management
+     - Subscription handling
+
+2. **Gradio UI (Development/Testing Interface)**
+   - URL: http://localhost:8000/chatbot
+   - Features:
+     - Direct RAG service integration
+     - Quick testing interface
+     - No authentication required
+     - Simplified chat experience
+     - Useful for development and debugging
 
 ## Setup Instructions
 
@@ -110,7 +137,7 @@ docker-compose up -d
 2. Start the backend server:
 ```bash
 cd backend
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 3. Start the frontend development server:
@@ -120,40 +147,93 @@ npm run dev
 ```
 
 The application will be available at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
+- React Frontend: http://localhost:3000
+- Gradio UI: http://localhost:8000/chatbot
 - API Documentation: http://localhost:8000/docs
+- Health Check: http://localhost:8000/health
 
-## Development Workflow
+## Current Status
 
-1. Backend Development:
-   - Models are defined in `backend/app/models`
-   - API routes are in `backend/app/api`
-   - Business logic goes in `backend/app/services`
+### RAG Implementation
+✅ Core RAG service with LangChain integration
+✅ Weaviate vector store setup
+✅ Document chunking and embedding pipeline
+✅ Robust error handling with fallback mechanisms
+✅ Automatic retries for API operations
+✅ Fallback to direct LLM when Weaviate is unavailable
+✅ Configurable timeouts and connection settings
+✅ Comprehensive logging system
 
-2. Frontend Development:
-   - Components are in `frontend/src/components`
-   - Pages are in `frontend/src/pages`
-   - API calls are handled in `frontend/src/services`
+### User Interface
+✅ Dual UI approach with React and Gradio
+✅ React frontend with Material-UI components
+✅ Gradio UI for development and testing
+✅ Responsive design for both interfaces
+✅ Cross-origin request handling
+✅ Real-time chat interaction
+✅ Source document display
 
-3. Testing:
-   - Backend: `pytest`
-   - Frontend: `npm test`
+### Authentication & Security
+✅ JWT-based authentication
+✅ User registration and login
+✅ Query limit tracking
+✅ Subscription management
+✅ API key security
+✅ Error handling and validation
 
-## Environment Variables
+### Database & Storage
+✅ PostgreSQL integration
+✅ Weaviate vector store
+✅ Migration system
+✅ Connection pooling
+✅ Error recovery
 
-Key environment variables required:
+### Development Tools
+✅ Comprehensive logging
+✅ Testing infrastructure
+✅ Development server configuration
+✅ Code formatting and linting
+✅ API documentation
 
-```env
-# Backend
-BACKEND_PORT=8000
-DATABASE_URL=postgresql://user:password@localhost:5432/lean6sigma
-WEAVIATE_URL=http://localhost:8080
-OPENAI_API_KEY=your-openai-api-key
+## Known Issues
 
-# Frontend
-VITE_API_URL=http://localhost:8000
-```
+- **Weaviate Connection**: 
+  ✅ Fixed: Added robust error handling and retries
+  ✅ Fixed: Implemented fallback to direct LLM
+  ✅ Fixed: Configurable timeouts
+  - Note: May need proper configuration in production
+
+- **Frontend Integration**:
+  ✅ Fixed: CORS configuration
+  ✅ Fixed: Authentication flow
+  ✅ Fixed: Real-time updates
+  - Note: Consider WebSocket for streaming responses
+
+## Next Steps
+
+1. **RAG Improvements**
+   - Implement streaming responses
+   - Add more LSS content
+   - Enhance context retrieval
+   - Optimize embedding process
+
+2. **UI Enhancements**
+   - Add chat message streaming
+   - Improve source document display
+   - Add visualization tools
+   - Enhance mobile responsiveness
+
+3. **Infrastructure**
+   - Set up CI/CD pipeline
+   - Add monitoring and analytics
+   - Implement caching
+   - Optimize performance
+
+4. **Documentation**
+   - Add API usage examples
+   - Improve setup guides
+   - Add troubleshooting section
+   - Document best practices
 
 ## Contributing
 
@@ -164,116 +244,4 @@ VITE_API_URL=http://localhost:8000
 
 ## License
 
-[License Type] - see LICENSE file for details
-
-## Current Progress
-
-- **RAG Implementation:**
-  - Core RAG service implemented with OpenAI integration
-  - Weaviate vector store setup and configured
-  - Document chunking and embedding pipeline
-  - Context retrieval and response generation
-  - Comprehensive error handling and logging
-  - Token limit handling with fallbacks
-  - Integration tests passing
-  - Troubleshooting tools and diagnostics added
-
-- **Database Setup:**
-  - PostgreSQL is configured and running using Docker Compose
-  - Initial database migrations have been successfully created and applied using Alembic
-  - Tables `users`, `chat_history`, `subscription_plans`, and `user_subscriptions` are set up
-  - Database connection pooling implemented for optimal performance
-
-- **Authentication System:**
-  - User registration and login endpoints fully implemented
-  - JWT token generation and validation working
-  - Token sharing across services implemented
-  - Comprehensive error handling and logging added
-  - Integration tests passing for auth endpoints
-
-- **Frontend Development:**
-  - Core layout with responsive design and navigation completed
-  - Authentication pages (Login/Register) with form validation
-  - Protected route handling and authentication state management
-  - Documentation page with markdown rendering and search
-  - Chat interface with real-time messaging and query limits
-  - Profile page with user settings and password management
-  - Material-UI components integrated for consistent design
-  - React Query implemented for efficient data fetching
-  - Cross-service token management working
-  - Integration tests passing for all services
-
-- **Chat System:**
-  - RAG-based chatbot implementation completed
-  - Chat endpoint (`/api/v1/chat/chat`) processes user queries
-  - Chat history stored in database
-  - Real-time query limit tracking and display
-  - Integration tests passing for chat endpoints
-  - Error handling and logging throughout
-  - Token limit handling implemented
-  - Diagnostic endpoints for troubleshooting
-
-- **Documentation System:**
-  - Structured knowledge base organization completed
-  - Comprehensive documentation templates created
-  - Initial DMAIC methodology documentation added
-  - Documentation API endpoints implemented:
-    - List available documents (`/api/v1/docs/list`)
-    - Retrieve document content (`/api/v1/docs/content/{path}`)
-    - Support for both markdown and HTML rendered content
-  - Integration tests passing for documentation endpoints
-
-- **Testing Infrastructure:**
-  - Integration tests implemented for all services
-  - Test utilities and helpers created
-  - Vitest configuration completed
-  - Test coverage for:
-    - Authentication flows
-    - Chat functionality
-    - Documentation retrieval
-    - RAG service operations
-  - GitHub Actions CI/CD setup pending
-  - Diagnostic tools for troubleshooting added
-
-- **Free Tier Implementation:**
-  - Query limiting functionality (10 queries per day)
-  - Query count tracking with automatic daily reset
-  - Endpoint to check remaining queries
-  - Rate limiting with appropriate error messages
-
-- **Subscription Management:**
-  - Subscription plans model and database tables
-  - User subscription tracking and management
-  - Tiered access with different query limits
-  - Subscription API endpoints:
-    - List available plans (`/api/v1/subscription/plans`)
-    - View current subscription (`/api/v1/subscription/my`)
-    - Subscribe to a plan (`/api/v1/subscription/subscribe`)
-    - Cancel subscription (`/api/v1/subscription/my/cancel`)
-  - Admin endpoints for plan management
-  - Payment processing integration (placeholder)
-  - Free plan auto-assignment for new users
-
-## Known Issues
-
-- **RAG Service Connectivity:**
-  - Intermittent issues with the RAG service response generation
-  - Weaviate vector database is running correctly but may require additional configuration
-  - OpenAI API integration may need troubleshooting in certain environments
-  - Error handling in the RAG service may need enhancement for better diagnostics
-
-- **Testing and Debugging:**
-  - Added diagnostic endpoints and tools for troubleshooting
-  - Enhanced logging for better error identification
-  - Documented common issues and their solutions
-  - Created step-by-step testing guide for all features
-
-## Next Steps
-
-- Add more LSS content to knowledge base
-- Resolve RAG service connectivity issues
-- Add advanced analytics
-- Set up CI/CD pipeline
-- Enhance error monitoring and logging
-- Add user feedback collection
-- Implement advanced visualization tools 
+[License Type] - see LICENSE file for details 

@@ -25,6 +25,7 @@ services:
       DEFAULT_VECTORIZER_MODULE: 'text2vec-openai'
       ENABLE_MODULES: 'text2vec-openai'
       TEXT2VEC_OPENAI_MODEL: 'text-embedding-3-small'
+      TEXT2VEC_OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
       - weaviate_data:/var/lib/weaviate
 
